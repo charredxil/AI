@@ -1,0 +1,6 @@
+fi = open("name.txt")
+print(fi.readline())
+fi.close()
+fi = open("name.txt", "w")
+fi.write(input("name: "))
+fi.close()

@@ -1,0 +1,2 @@
+import sys, regex
+print((lambda x: "{} matches (positions {})".format(len(x), x))([match.start() for match in regex.finditer(sys.argv[1][:sys.argv[1].index(' ')], sys.argv[1][sys.argv[1].index(' ')+1:], overlapped=True)]))
