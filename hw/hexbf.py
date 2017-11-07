@@ -25,4 +25,4 @@ def isInvalid(pzl):
 
 empty = set(range(24))
 pzl = ['.' for _ in range(24)]
-print(bruteForce(pzl, empty))
+bruteForce(pzl, empty)
