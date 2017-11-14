@@ -15,7 +15,7 @@ class problem:
         vardomain = self.var_domain[tosat].copy()
         for val in vardomain:
             self.var_domain[tosat] = {val}
-            #print(val)
+            print(val)
             removed = self.consist_var(tosat, {})
             if removed is None: continue
             #print(removed)

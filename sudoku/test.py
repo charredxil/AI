@@ -1,14 +1,15 @@
-import sudoku, sys, time
-def sudokus_from_file(filename, blanks='0. '):
-    sus = []
-    with open(filename) as fi:
-        for line in fi:
-            sus.append(sudoku.makesudoku(line.strip(), blanks))
-            if sus[-1] is None: sus.pop()
-    return sus
+import sys, time
+import sudoku as su
 
-sus = sudokus_from_file('puzzlesHard.txt')
+filename = 'puzzles.txt' if len(sys.argv) == 1 else sys.argv[1]
+puzzles = [line.strip() for line in open(filename)]
+template = {}
 start = time.time()
-print(sus[-2])
-print(sudoku.exactcover(sus[-2], findall=False))
-print(str((time.time()-start)/len(sus)))
+for p in puzzles:
+    if len(p) not in template: template[len(p)] = su.template(len(p))
+    t = template[len(p)]
+    print(t.string(p))
+    s = su.solver(p, t)
+    p = s.solution()
+    print(t.string(p))
+print("Elapsed time: ", time.time()-start)

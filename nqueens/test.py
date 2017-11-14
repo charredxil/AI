@@ -1,5 +1,5 @@
-import sys
+import sys, cProfile
 from nqueens import *
 qb = queenboard(int(sys.argv[1]))
-qb.solve()
+cProfile.run('qb.solve()')
 print(qb)
