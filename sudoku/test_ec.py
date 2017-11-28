@@ -1,4 +1,4 @@
-import sudoku_slow as sudoku
+import sudoku_ec as sudoku
 import sys, time
 def sudokus_from_file(filename, blanks='0. '):
     sus = []
@@ -10,7 +10,8 @@ def sudokus_from_file(filename, blanks='0. '):
 filename = 'puzzles.txt' if len(sys.argv) == 1 else sys.argv[1]
 sus = sudokus_from_file(filename)
 start = time.time()
-for su in sus[:128]:
+for ix, su in enumerate(sus[-1:]):
+    print(ix)
     print(su)
     solved = sudoku.exactcover(su)
     print(solved)

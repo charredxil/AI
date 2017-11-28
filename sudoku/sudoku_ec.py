@@ -1,4 +1,4 @@
-import math, sys
+import math, sys, time
 sys.path.append('A:/')
 import general.exactcover as ec
 
@@ -20,7 +20,7 @@ def exactcover(su, findall=True):
             if val: continue
             for val in su.values:
                 conds = cond_strs(rnum, cnum, bnum, val)
-                poss = poss_str(rnum, cnum, val)
+                poss = (rnum, cnum, val)
                 if any(map(lambda x: x in satisfied_conds, conds)):
                     continue
                 possibilities[poss] = conds
@@ -29,8 +29,7 @@ def exactcover(su, findall=True):
                     else: conditions[cond] = set([poss])
     solutions = ec.exactcovers(possibilities, conditions)
     if not solutions: return None
-    for r, c, v in next(solutions):
-        solved_board[r][c] = v
+    for r, c, v in next(solutions): solved_board[r][c] = v
     return sudoku(solved_board, su.values)
     
 class sudoku:
@@ -53,15 +52,7 @@ class sudoku:
             out += '|\n'
         return out + breakrow[:-1]
 
-def poss_str(r, c, v):
-    return (r, c, v)
-def cond_strs(r, c, b, v):
-    conds = []
-    conds.append((0, r, c))
-    conds.append((1, r, v))
-    conds.append((2, c, v))
-    conds.append((3, b, v))
-    return conds
+cond_strs = lambda r, c, b, v: [(0, r, c), (1, r, v), (2, c, v), (3, b, v)]
 def nearest_factors(num):
     for mul in range(2, num+1):
         lo, hi = mul, num/mul
@@ -76,13 +67,11 @@ def makesudoku(s, blanks):
         if ch in blanks: continue
         board[i//size][i%size] = ch
         values.add(ch)
-    if len(values) < len(board):
-        complete_values(values, board)
+    if len(values) < len(board): complete_values(values, board)
     return sudoku(board, values)
 def complete_values(values, board):
     cur = 65
-    if any(map(lambda v: 49 <= ord(v) <= 57, values)):
-        cur = 49
+    if any(map(lambda v: 49 <= ord(v) <= 57, values)): cur = 49
     while len(values) < len(board):
         if 65 > cur > 57: cur = 65
         if chr(cur) in values: cur += 1
