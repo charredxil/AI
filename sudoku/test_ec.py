@@ -8,9 +8,9 @@ def sudokus_from_file(filename, blanks='0. '):
     return sus
 
 filename = 'puzzles.txt' if len(sys.argv) == 1 else sys.argv[1]
-sus = sudokus_from_file(filename)
+sus = [line.strip() for line in open(filename)]
 start = time.time()
-for ix, su in enumerate(sus[-1:]):
+for ix, su in enumerate(sus):
     print(ix)
     print(su)
     solved = sudoku.exactcover(su)

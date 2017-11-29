@@ -6,22 +6,58 @@ class Deducer:
         self.t = t
         self.board = ['.' for _ in range(self.t.cells)]
         self.vals = values(p, t.side)
-        self.opts = {(0, i) : self.vals.copy() for i in range(t.cells)}
-        self.opts.update({(1, val, unit) : t.groups[unit].copy() for val in self.vals for unit in range(t.side*3)})
-        self.empty = set(self.opts.keys())
+        self.opts = {(0, i) : domain(self.vals.copy()) for i in range(t.cells)}
+        self.opts.update({(1, val, unit) : domain(t.groups[unit].copy()) for val in self.vals for unit in range(t.side*3)})
+        self.empty = domain(self.opts.keys())
+        self.save = False
+        self.saved = self.failed = None
         for ix, v in filter(lambda t: t[1] != '.', enumerate(p)): self.assign((0, ix), v)
+    def sumopts(self): return sum(map(lambda x: len(x), self.opts.values()))
     def deduce(self):
-        prev_sum_opts = sum(map(lambda x: len(x), self.opts.values()))
+        prev_sum_opts = self.sumopts()
+        prev_ept = len(self.empty)
         loops = 0
         while True:
             loops += 1
-            self.altpair_deduce()
-            self.shareset_deduce()
-            self.preempt_deduce()
-            new_sum_opts = sum(map(lambda x: len(x), self.opts.values()))
+            self.deduce_noguess()
+            self.shave_deduce()
+            #print(len(self.empty))
+            new_sum_opts = self.sumopts()
             if new_sum_opts == prev_sum_opts: break
             prev_sum_opts = new_sum_opts
         print("deduction loops:", loops)
+    def deduce_noguess(self, save=False):
+        prev_sum_opts = self.sumopts()
+        while True:
+            self.altpair_deduce()
+            self.shareset_deduce()
+            self.preempt_deduce()
+            new_sum_opts = self.sumopts()
+            if new_sum_opts == prev_sum_opts: break
+            prev_sum_opts = new_sum_opts
+    def shave_deduce(self):
+        self.save = True
+        for key in sorted(self.empty, key=lambda x:len(self.opts[x])):
+            if self.shave_deduce_key(key): break
+            elif self.shave_deduce_key(key, fardeduce=True): break
+        self.save = False
+    def shave_deduce_key(self, key, fardeduce=False):
+        if key not in self.empty: return
+        toremove = set()
+        self.empty.save()
+        oldboard = self.board.copy()
+        for choice in self.opts[key].copy():
+            self.saved = set()
+            self.failed = False
+            self.assign(key, choice)
+            if not self.failed and fardeduce: self.deduce_noguess()
+            self.empty.restore(resave=True)
+            self.board = oldboard.copy()
+            for a in self.saved: self.opts[a].restore()
+            if self.failed: toremove.add(choice)
+            if len(self.opts[key]) - len(toremove) == 1: break
+        for o in toremove: self.removeopt(key, o)
+        return True if toremove else False
     def preemptive_sets(self, keys):
         partial = {frozenset(): 0}
         total = []
@@ -93,36 +129,47 @@ class Deducer:
                 for k in keys:
                     if not self.opts[k] <= preset:
                         for o in preset: 
-                            upgroups |= self.removeopt(k, o)
+                            alt = self.removeopt(k, o)
+                            for k in alt: upgroups.update({k[2]} if k[0] else self.t.cellgroups[k[1]])
             deducable.update({(typ, ug) for ug in upgroups})
     def assign(self, key, onlyopt):
-        upgroups = set()
+        altered = set()
         if key in self.empty:
             ix, val = (onlyopt, key[1]) if key[0] else (key[1], onlyopt)
             self.board[ix] = val
-            if self.opts[key] != 1: self.opts[key] = {onlyopt}
-            self.empty.discard((0, ix))
+            if len(self.opts[key]) != 1:
+                if self.save and key not in self.saved: 
+                    self.saved.add(key)
+                    self.opts[key].save()
+                for o in self.opts[key].copy():
+                    if o != onlyopt: self.opts[key].hide(o)
+            self.empty.hide((0, ix))
             for group in self.t.cellgroups[ix]:
-                for v in (self.vals - {val}): self.removeopt((1, v, group), ix)
-                self.empty.discard((1, val, group))
+                for v in (self.vals - {val}): 
+                    altered.update(self.removeopt((1, v, group), ix))
+                self.empty.hide((1, val, group))
             for cell in self.t.peers[ix]:
-                upgroups.update(self.removeassign(cell, val))
-        return upgroups
+                altered.update(self.removeassign(cell, val))
+        return altered
     def removeopt(self, key, opt):
-        upgroups = set()
+        altered = set()
         if opt in self.opts[key]:
-            ix = opt if key[0] else key[1]
-            upgroups.update(self.t.cellgroups[ix])
-            self.opts[key].remove(opt) 
-            if len(self.opts[key]) == 1:
+            altered.add(key)
+            if self.save and key not in self.saved: 
+                self.saved.add(key)
+                self.opts[key].save()
+            self.opts[key].hide(opt)
+            lenopts = len(self.opts[key])
+            if self.save and lenopts == 0: self.failed = True
+            if lenopts == 1:
                 onlyopt = next(iter(self.opts[key]))
-                upgroups.update(self.assign(key, onlyopt))
-        return upgroups
+                altered.update(self.assign(key, onlyopt))
+        return altered
     def removeassign(self, ix, val):
-        upgroups = self.removeopt((0, ix), val)
+        altered = self.removeopt((0, ix), val)
         for group in self.t.cellgroups[ix]:
-            upgroups.update(self.removeopt((1, val, group), ix))
-        return upgroups
+            altered.update(self.removeopt((1, val, group), ix))
+        return altered
 
 def solve(p, t):
     d = Deducer(p, t)
@@ -131,7 +178,6 @@ def solve(p, t):
     print("#opts post-deduce:", sum(map(lambda x: len(x), d.opts.values())))
     print("Valid" if check(d.board, t) else "Invalid")
     return ''.join(d.board)
-
 def main():
     filename = 'puzzles.txt' if len(sys.argv) == 1 else sys.argv[1]
     puzzles = [line.strip() for line in open(filename)]
@@ -169,6 +215,23 @@ class template:
         xps = [''.join(map(lambda c: ' ' if c == '.' else c, p)) for p in ps]
         lines = [self._string(p).splitlines() for p in xps]
         return ''.join([' '.join(ls)+'\n' for ls in zip(*lines)])[:-1]
+class domain(set):
+    def __init__(self, it):
+        set.__init__(self, it)
+        self._hidden = []
+        self._pastlen = []
+    def save(self):
+        self._pastlen.append(len(self))
+    def restore(self, resave=False):
+        pl = self._pastlen[-1] if resave else self._pastlen.pop()
+        diff = pl - len(self)
+        if diff != 0:
+            self.update(self._hidden[-diff:])
+            del self._hidden[-diff:]
+    def hide(self, val):
+        if val not in self: return
+        self.remove(val)
+        if self._pastlen: self._hidden.append(val)
 
 def nearest_factors(num):
     for mul in range(2, num+1):
@@ -190,4 +253,4 @@ def check(p, t):
             seen.add(p[cell])
     return True
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": cProfile.run('main()')
