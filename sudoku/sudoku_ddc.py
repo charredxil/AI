@@ -17,29 +17,34 @@ class Deducer:
         prev_sum_opts = self.sumopts()
         prev_ept = len(self.empty)
         loops = 0
+        a = None
         while True:
             loops += 1
-            self.deduce_noguess()
-            self.shave_deduce()
+            self.deduce_noguess(prevalt=a)
+            a = self.shave_deduce()
             #print(len(self.empty))
             new_sum_opts = self.sumopts()
             if new_sum_opts == prev_sum_opts: break
             prev_sum_opts = new_sum_opts
         print("deduction loops:", loops)
-    def deduce_noguess(self, save=False):
+    def deduce_noguess(self, prevalt=None):
         prev_sum_opts = self.sumopts()
+        if prevalt is None: a1, a2, a3 = self.empty.copy(), self.empty.copy(), self.empty.copy()
+        else: a1, a2, a3 = prevalt.copy(), prevalt.copy(), prevalt.copy()
         while True:
-            self.altpair_deduce()
-            self.shareset_deduce()
-            self.preempt_deduce()
+            a1 = self.shareset_deduce(prevalt = a2 | a3)
+            a2 = self.preempt_deduce(prevalt = a1 | a3)
+            a3 = self.altpair_deduce(prevalt = a1 | a2)
             new_sum_opts = self.sumopts()
             if new_sum_opts == prev_sum_opts: break
             prev_sum_opts = new_sum_opts
     def shave_deduce(self):
         self.save = True
         for key in sorted(self.empty, key=lambda x:len(self.opts[x])):
-            if self.shave_deduce_key(key): break
-            elif self.shave_deduce_key(key, fardeduce=True): break
+            res = self.shave_deduce_key(key)
+            if res[0]: return res[1]
+            res = self.shave_deduce_key(key, fardeduce=True)
+            if res[0]: return res[1]
         self.save = False
     def shave_deduce_key(self, key, fardeduce=False):
         if key not in self.empty: return
@@ -56,8 +61,62 @@ class Deducer:
             for a in self.saved: self.opts[a].restore()
             if self.failed: toremove.add(choice)
             if len(self.opts[key]) - len(toremove) == 1: break
-        for o in toremove: self.removeopt(key, o)
-        return True if toremove else False
+        alt = set()
+        for o in toremove: alt |= self.removeopt(key, o)
+        return (True, alt) if toremove else (False, alt)
+    def shareset_deduce(self, prevalt=None):
+        if not self.empty: return set()
+        toremove = {}
+        groups = reduce(lambda a, b: a | b, (self.keygroups(a) for a in prevalt)) if prevalt else range(self.t.cells*3)
+        for g in groups:
+            for val in self.vals:
+                if (1, val, g) not in self.empty: continue
+                shared = reduce(lambda a, b: a & b, [self.t.cellgroups[ix] for ix in self.opts[(1, val, g)]]) - {g}
+                if len(shared) == 0: continue
+                shared = list(shared)[0]
+                for ix in (self.t.groups[shared] - self.opts[(1, val, g)]):
+                    if ix in toremove: toremove[ix].add(val)
+                    else: toremove[ix] = {val}
+        alt = set()
+        for ix in toremove:
+            for val in toremove[ix]:
+                alt |= self.removeassign(ix, val)
+        return alt
+    def altpair_deduce(self, prevalt=None):
+        if not self.empty: return set()
+        alt = set()
+        vals = {k[1] for k in prevalt if k[0] == 1} if prevalt else self.vals
+        for val in vals: alt |= self.altpair_deduce_val(val)
+        return alt
+    def altpair_deduce_val(self, val):
+        altpairs = {}
+        for g in range(self.t.side*3):
+            if len(self.opts[(1, val, g)]) == 2:
+                pair = tuple(self.opts[(1, val, g)])
+                for ix, c in enumerate(pair):
+                    if c in altpairs: altpairs[c].add(pair[1-ix])
+                    else: altpairs[c] = {pair[1-ix]}
+        toremovefrom = set()
+        uncolored = set(altpairs.keys())
+        fail = None
+        def color(ix, c, c_opp):
+            if ix in c_opp: fail = c_opp
+            elif ix not in c:
+                c.add(ix)
+                for a in altpairs[ix]: color(a, c_opp, c)
+        while uncolored:
+            tocolor = next(iter(uncolored))
+            c1, c2 = set(), set()
+            color(tocolor, c1, c2)
+            uncolored -= (c1 | c2)
+            if fail: toremovefrom |= fail
+            else:
+                c1peers = reduce(lambda a, b: a | b, [self.t.peers[i] for i in c1])
+                c2peers = reduce(lambda a, b: a | b, [self.t.peers[i] for i in c2])
+                toremovefrom |= c1peers & c2peers
+        alt = set()
+        for ix in toremovefrom: alt |= self.removeassign(ix, val)
+        return alt
     def preemptive_sets(self, keys):
         partial = {frozenset(): 0}
         total = []
@@ -70,54 +129,12 @@ class Deducer:
                 if len(new) == count+1: total.append(new)
             partial.update(new_partial)
         return total
-    def shareset_deduce(self):
-        if not self.empty: return
-        toremove = [set() for ix in range(self.t.cells)]
-        for g in range(self.t.side*3):
-            for val in self.vals:
-                if (1, val, g) not in self.empty: continue
-                shared = reduce(lambda a, b: a & b, [self.t.cellgroups[ix] for ix in self.opts[(1, val, g)]]) - {g}
-                if len(shared) == 0: continue
-                shared = next(iter(shared))
-                for ix in (self.t.groups[shared] - self.opts[(1, val, g)]):
-                    toremove[ix].add(val)
-        for ix in range(self.t.cells):
-            for val in toremove[ix]:
-                self.removeassign(ix, val)
-    def altpair_deduce(self):
-        if not self.empty: return
-        for val in self.vals: self.altpair_deduce_val(val)
-    def altpair_deduce_val(self, val):
-        alts = {}
-        for g in range(self.t.side*3):
-            if len(self.opts[(1, val, g)]) == 2:
-                pair = tuple(self.opts[(1, val, g)])
-                for ix, c in enumerate(pair):
-                    if c in alts: alts[c].add(pair[1-ix])
-                    else: alts[c] = {pair[1-ix]}
-        toremovefrom = set()
-        uncolored = set(alts.keys())
-        fail = None
-        def color(ix, c, c_opp):
-            if ix in c_opp: fail = c_opp
-            elif ix not in c:
-                c.add(ix)
-                for a in alts[ix]: color(a, c_opp, c)
-        while uncolored:
-            tocolor = next(iter(uncolored))
-            c1, c2 = set(), set()
-            color(tocolor, c1, c2)
-            uncolored -= (c1 | c2)
-            if fail:
-                toremovefrom |= fail
-                continue
-            c1peers = reduce(lambda a, b: a | b, [self.t.peers[i] for i in c1])
-            c2peers = reduce(lambda a, b: a | b, [self.t.peers[i] for i in c2])
-            toremovefrom |= c1peers & c2peers
-        for ix in toremovefrom: self.removeassign(ix, val)
-    def preempt_deduce(self):
-        if not self.empty: return
-        deducable = {(0, x) for x in range(self.t.side*3)} | {(1, x) for x in range(self.t.side*3)}
+    def keygroups(self, k): return {k[2]} if k[0] else self.t.cellgroups[k[1]]
+    def preempt_deduce(self, prevalt=None):
+        if not self.empty: return set()
+        prevaltg = reduce(lambda a, b: a | b, (self.keygroups(k) for k in prevalt)) if prevalt else range(self.t.side*3)
+        deducable = {(0, x) for x in prevaltg} | {(1, x) for x in prevaltg}
+        alt = set()
         while deducable:
             typ, gx = next(iter(deducable))
             deducable.remove((typ, gx))
@@ -129,9 +146,11 @@ class Deducer:
                 for k in keys:
                     if not self.opts[k] <= preset:
                         for o in preset: 
-                            alt = self.removeopt(k, o)
-                            for k in alt: upgroups.update({k[2]} if k[0] else self.t.cellgroups[k[1]])
+                            a = self.removeopt(k, o)
+                            alt |= a
+                            for k in a: upgroups.update(self.keygroups(k))
             deducable.update({(typ, ug) for ug in upgroups})
+        return alt
     def assign(self, key, onlyopt):
         altered = set()
         if key in self.empty:
@@ -168,15 +187,15 @@ class Deducer:
     def removeassign(self, ix, val):
         altered = self.removeopt((0, ix), val)
         for group in self.t.cellgroups[ix]:
-            altered.update(self.removeopt((1, val, group), ix))
+            altered |= self.removeopt((1, val, group), ix)
         return altered
 
 def solve(p, t):
     d = Deducer(p, t)
-    print("#opts pre-deduce:", sum(map(lambda x: len(x), d.opts.values())))
-    d.deduce()
-    print("#opts post-deduce:", sum(map(lambda x: len(x), d.opts.values())))
-    print("Valid" if check(d.board, t) else "Invalid")
+    #print("#opts pre-deduce:", sum(map(lambda x: len(x), d.opts.values())))
+    d.deduce_noguess()
+    #print("#opts post-deduce:", sum(map(lambda x: len(x), d.opts.values())))
+    #print("Valid" if check(d.board, t) else "Invalid")
     return ''.join(d.board)
 def main():
     filename = 'puzzles.txt' if len(sys.argv) == 1 else sys.argv[1]
@@ -253,4 +272,4 @@ def check(p, t):
             seen.add(p[cell])
     return True
 
-if __name__ == "__main__": cProfile.run('main()')
+if __name__ == "__main__": main()
